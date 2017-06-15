@@ -1,0 +1,114 @@
+---
+title: "analysis_markdown.Rd"
+output: html_document
+---
+# A minimal R Markdown example
+ 
+A quote:
+ 
+> Markdown is not LaTeX.
+ 
+To compile me, run this in R:
+ 
+    library(knitr)
+    knit('analysis.Rmd')
+
+
+# Introduction
+The RMarkdown file executes the same code as in analysis... with slightly more explanation. We include this file to show how to use RMarkdown for creating reports.
+
+## Install and load the packages first. 
+```{r install_packages, echo=TRUE}
+install.packages(c("ggmap"))
+library(dplyr)
+library(ggplot2)
+
+```
+
+## Load the data:
+```{r load_data}
+crimedata <- read.csv("SFPD_Incidents_-_Current_Year__2015_.csv")
+```
+
+## We will look at ASSAULT that happen on a Monday. We define the variables and the function that filtered out data here.
+```{r define_functions}
+crime <- 'ASSAULT'
+day <- 'Monday'
+SF_COORDINATES <- c(37.76, -122.45)
+
+# Define function to filter the data
+get_filtered <- function(crime, day){
+  filter(crimedata,crimedata$DayOfWeek == day & crimedata$Category == crime)
+}
+```
+
+##Explore the data
+We start by filtering the data, seeing all the different types of crimes that are tracked, and inspecting the form of the data.
+```{r explore_data}
+filtered_crimedata<- get_filtered(crime, day)
+print(unique(filtered_crimedata$Category), max.levels = 40, quote=TRUE)
+head(filtered_crimedata)
+```
+
+### Mapping the crimes
+```{r map_crimes}
+library(ggmap)
+sf <- get_map(location = rev(SF_COORDINATES), zoom = 12, color='bw')
+map_points <- ggmap(sf) + geom_point(data=filtered_crimedata, 
+                       aes(x=X, y=Y),size=1, color='red') +
+  labs(x="Longitude", y="Latitude")
+
+map_points
+dev.copy(png,'simple_map.png')
+dev.off()
+```
+
+## K-means to find the clusters
+```{r kmeans}
+X <- data.frame(filtered_crimedata$X, filtered_crimedata$Y)
+Y<-kmeans(X,4)
+X_with_clusters <- cbind(X, Y$cluster)
+names(X_with_clusters)[3] <- ".cluster"
+kmeans_plot <- ggmap(sf) + geom_point(data=X_with_clusters, 
+                                     aes(x=filtered_crimedata.X, y=filtered_crimedata.Y),
+                                     size=1, color=X_with_clusters$.cluster) +
+  labs(x="Longitude", y="Latitude")
+kmeans_plot
+dev.copy(png,'kmeans.png')
+dev.off()
+```
+
+## Linear regression
+Let's look at all crimes and see what times they occur. We'll try to interpolate with linear regression.
+```{r lin_reg}
+time_data <- as.POSIXct(crimedata$Time,format="%H:%M")
+df <- data.frame(time =  time_data)
+df$time = strptime(df$time, "%Y-%m-%d %H:%M") 
+df$x2 = paste0(substr(df$time, 1, 14), "00:00")
+df2 = data.frame(table(df$x2))
+names(df2) = c("Hour","Freq")
+df2$Freq<-as.numeric(df2$Freq)
+df2$Hour<-as.numeric(df2$Hour)
+
+fit <- lm(formula = Freq ~ Hour, data=df2)
+summary(fit)
+p <-qplot(df2$Hour, df2$Freq)
+p+ geom_abline(aes(intercept=fit$coefficients[1], 
+                   slope=fit$coefficients[2]), col="red")
+dev.copy(png,'linear_regression.png')
+dev.off()
+```
+
+## Random Forest regression
+```{r random_forest}
+library(randomForest)
+rf <- randomForest(Freq ~ Hour, data = df2, ntree=24)
+pred <- data.frame(predict(rf, df2))
+names(pred)[1] <- "Pred"
+pred$Hour <- df2$Hour
+p <-ggplot(df2, aes(Hour, Freq, color = "Actual") ) + geom_point(alpha=1)
+p<- p + geom_point(aes(x = Hour, y = Pred, color="Predicted"), data=pred, alpha =1)
+p
+dev.copy(png,'rf.png')
+dev.off()
+```

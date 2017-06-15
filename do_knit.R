@@ -1,0 +1,1 @@
+rmarkdown::render(commandArgs(TRUE)[1])
